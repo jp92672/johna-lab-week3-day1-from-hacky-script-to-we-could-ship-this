@@ -7,7 +7,7 @@
 
 **What was refactored:** The original notebook's `generate_product_listing` function did four jobs at once — built the prompt, encoded the product image, called the OpenAI vision API, and parsed the JSON response — with only one handled error case (`JSONDecodeError`, printed with no function name or location) and no handling at all for network failures, missing files, or malformed listings. Pydantic was imported but never used.
 
-**How it was modularized and error handling improved:** Split into four single-responsibility functions — `build_vision_messages`, `call_vision_api`, `parse_listing_response`, `validate_listing` — each independently tested, composed by a slim `generate_product_listing`. Added explicit handling for all 5 required error types (`FileNotFoundError`, `JSONDecodeError`, Pydantic `ValidationError`, OpenAI API errors, network errors), each confirmed with a live test and each message naming the function, what happened, and a suggested fix. Full before/after detail with real output: `comparison_original_vs_refactored.md`.
+**How it was modularized and error handling improved:** Split into four single-responsibility functions — `build_vision_messages`, `call_vision_api`, `parse_listing_response`, `validate_listing` — each independently tested, composed by a slim `generate_product_listing`. Added explicit handling for all 5 required error types (`FileNotFoundError`, `JSONDecodeError`, Pydantic `ValidationError`, OpenAI API errors, network errors), each confirmed with a live test and each message naming the function, what happened, and a suggested fix. Full before/after detail with real output: `Outputs/comparison_original_vs_refactored.md`.
 
 **Main challenge:** My original Week 2 investigation found that low-resolution product images caused the model to silently ignore the image and write a listing from text metadata alone, with no error to signal it. The refactor's biggest job was turning that into a real, testable signal: `check_image_resolution` flags any image below a resolution floor, and every listing now carries an `is_high_res` field. Tuning that floor was itself a live bug during this refactor — an initial 512px threshold flagged every image in the working dataset (all ~333–500px, genuinely fine) as low-res. Verified the real pixel dimensions directly and reset the floor to 200px, grounded in the original investigation's evidence (60×80px confirmed broken, 313×400px confirmed working).
 
@@ -30,12 +30,12 @@ TRANSFORM:  generate_product_listing
               -> call_vision_api         (OpenAI gpt-4o-mini vision call)
               -> parse_listing_response  (JSON parse)
               -> validate_listing        (Pydantic schema check)
-ACTION:     Save to generated_listings_refactored.json
+ACTION:     Save to Outputs/generated_listings_refactored.json
 ```
 
 **Code file:** `product_listing_generator_refactored.ipynb`
 **Original preserved:** `product_listing_generator_original.ipynb`
-**Output file:** `generated_listings_refactored.json`
+**Output file:** `Outputs/generated_listings_refactored.json`
 
 ### Execution Trace (Step 6 batch run)
 
@@ -46,7 +46,7 @@ Processing product 2: RPM Rear Shock Tower for The Nitro Slash, Nitro Stampede, 
 Processing product 3: Disney Pixar Cars Mini Racers Crank & Crash Derby Playset
 Processing product 4: Areaware Cubebot Small
 BATCH COMPLETE: 5/5 succeeded, 0 failed
-Saved to generated_listings_refactored.json
+Saved to Outputs/generated_listings_refactored.json
 ```
 
 ### Input Payload (product id 0)
@@ -84,7 +84,7 @@ image_url:    "https://images-na.ssl-images-amazon.com/images/I/51FUt3TYecL.jpg"
 
 ### Error Handling Evidence
 
-All 5 required error types confirmed with a live test (function name, what happened, suggested fix — full detail in `comparison_original_vs_refactored.md`):
+All 5 required error types confirmed with a live test (function name, what happened, suggested fix — full detail in `Outputs/comparison_original_vs_refactored.md`):
 
 ```
 Missing file:     load_listings_file: no file found at 'does_not_exist.json'. Check the path is correct and the file has been generated.
@@ -96,11 +96,11 @@ OpenAI API error: call_vision_api: OpenAI API error calling gpt-4o-mini: Error c
 
 ### Verify
 
-Reviewer can inspect `generated_listings_refactored.json` directly (5 records, `id`/`listing`/`error` per product) and cross-check any record's `listing.title`/`description` against the source image URL in the notebook's Step 6 dataset load, to confirm the listing was actually grounded in the image.
+Reviewer can inspect `Outputs/generated_listings_refactored.json` directly (5 records, `id`/`listing`/`error` per product) and cross-check any record's `listing.title`/`description` against the source image URL in the notebook's Step 6 dataset load, to confirm the listing was actually grounded in the image.
 
 ### Prompt Discipline (Workflow Reviewer Challenge)
 
-Applied against the built pipeline (trigger: dataset load, transform: `generate_product_listing`, destination: `generated_listings_refactored.json`):
+Applied against the built pipeline (trigger: dataset load, transform: `generate_product_listing`, destination: `Outputs/generated_listings_refactored.json`):
 
 **Three workflow risks:**
 1. The dataset slice `train[:5]` is an index-based cut, not ID-based — if the upstream dataset is ever reordered or updated, "product 0" silently becomes a different product with no warning.
@@ -108,7 +108,7 @@ Applied against the built pipeline (trigger: dataset load, transform: `generate_
 3. `is_high_res` is computed and stored, but nothing in the pipeline acts on it — a low-res image still produces and saves a listing exactly like a high-res one; the flag is informational only, not a gate.
 
 **Two trace checks:**
-1. Does every record in `generated_listings_refactored.json` have either a populated `listing` or a populated `error`, never both null or both filled?
+1. Does every record in `Outputs/generated_listings_refactored.json` have either a populated `listing` or a populated `error`, never both null or both filled?
 2. Does `is_high_res` appear on every successful listing, confirming the detection ran on every item, not just the first?
 
 **One simplification:** `build_vision_messages` returns a tuple `(messages, is_high_res)` — mixing "what to send" with "a fact about the image" in one return value. A small dataclass or two named return values would read cleaner, though not worth a further refactor this late in the lab.
